@@ -3142,7 +3142,12 @@ function togglePause(){
 }
 
 /* ---------- entrada ---------- */
+const enCampoDeTexto = e => {
+  const t = e.target;
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+};
 addEventListener('keydown', e => {
+  if (enCampoDeTexto(e)) return;        // escribiendo en un campo (p. ej. el nivel del panel DEV)
   if (e.repeat) return;                 // ignora la repetición al mantener pulsado
   if (e.key === 'p' || e.key === 'P'){ togglePause(); return; }
   if (e.key === '['){ cycleTheme(-1); return; }                 // DEV: escenario anterior
@@ -3160,6 +3165,7 @@ addEventListener('keydown', e => {
   if (e.key === ' ') keys[' '] = true;
 });
 addEventListener('keyup', e => {
+  if (enCampoDeTexto(e)) return;
   keys[e.key.length === 1 ? e.key.toLowerCase() : e.key] = false;
 });
 

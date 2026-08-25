@@ -42,27 +42,33 @@
     width:100%; height:auto;
   }
   #overlay{
-    position:absolute; inset:0; display:flex; flex-direction:column; gap:12px;
+    position:absolute; inset:0; display:flex; flex-direction:column; gap:16px;
     align-items:center; justify-content:center; text-align:center;
-    background:rgba(10,11,16,.88); border-radius:10px; padding:20px; backdrop-filter:blur(3px);
+    background:rgba(10,11,16,.9); border-radius:10px; padding:28px 20px; backdrop-filter:blur(3px);
     overflow:auto;
   }
   #overlay.hidden{display:none}
-  #overlay h2{margin:0; font-size:30px; color:var(--acc)}
-  #overlay p{margin:0; color:var(--dim); font-size:17px; line-height:1.6; max-width:460px}
+  #overlay h2{margin:0; font-size:32px; color:var(--acc)}
+  #overlay p{margin:0; color:var(--dim); font-size:17px; line-height:1.6; max-width:420px}
   input{
-    font:inherit; background:#232636; color:var(--txt); border:1px solid var(--line);
-    border-radius:8px; padding:8px 12px; text-align:center;
+    font-size:18px; background:#232636; color:var(--txt); border:1px solid var(--line);
+    border-radius:10px; padding:13px 16px; text-align:center;
   }
   button{
-    font:inherit; font-weight:600; cursor:pointer; color:#12131a; background:var(--acc);
-    border:0; border-radius:8px; padding:10px 18px;
+    font-size:18px; font-weight:700; cursor:pointer; color:#12131a; background:var(--acc);
+    border:0; border-radius:10px; padding:14px 22px;
   }
   button.ghost{background:transparent; color:var(--txt); border:1px solid var(--line)}
   button:disabled{opacity:.45; cursor:default}
   .k{background:#232636; border:1px solid var(--line); border-radius:5px; padding:1px 6px; color:var(--txt)}
-  .lista{display:flex; flex-direction:column; gap:6px; margin:4px 0}
-  .fila{display:flex; align-items:center; gap:8px; font-size:13px; justify-content:center}
+  .fila{display:flex; align-items:center; gap:10px; justify-content:center; flex-wrap:wrap}
+  .rotulo{color:var(--dim); font-size:14px; letter-spacing:.06em; text-transform:uppercase; margin:4px 0 0}
+  .salas{display:flex; flex-direction:column; gap:8px; width:100%; max-width:340px}
+  .sala-btn{
+    display:flex; align-items:center; justify-content:space-between; width:100%;
+    font-size:19px; font-weight:800; padding:15px 20px;
+  }
+  .sala-btn span{font-size:15px; font-weight:600; color:var(--dim)}
   #estado{font-size:12px; color:var(--dim)}
 </style>
 </head>
@@ -755,6 +761,8 @@ function pintarMarcador(){
 }
 
 /* ---------- pantallas ---------- */
+let renderizarSalas = null;
+
 function pantallaConexion(){
   const codigoUrl = (new URLSearchParams(location.search).get('sala') || '').toUpperCase();
   ovTitle.textContent = HIST ? 'Historia' : 'Versus';
@@ -765,49 +773,83 @@ function pantallaConexion(){
   inpNombre.maxLength = 12; inpNombre.placeholder = 'Tu nombre';
   inpNombre.value = localStorage.getItem('bg-nombre') || 'Jugador';
   const guardarNombre = () => localStorage.setItem('bg-nombre', inpNombre.value);
+  const nombreActual = () => inpNombre.value || 'Jugador';
 
   const btnRapida = document.createElement('button');
-  btnRapida.style.cssText = 'font-size:19px; padding:16px 28px';
   btnRapida.textContent = 'Jugar en red local';
-  btnRapida.onclick = () => { guardarNombre(); conectar(inpNombre.value || 'Jugador', { t: 'rapida', modo: MODO }); };
+  btnRapida.onclick = () => {
+    guardarNombre();
+    enCuantoAbra(() => mandar({ t: 'rapida', modo: MODO, nombre: nombreActual() }));
+  };
 
   const filaNombre = document.createElement('div');
   filaNombre.className = 'fila';
   filaNombre.append(inpNombre, btnRapida);
   ovExtra.appendChild(filaNombre);
 
-  const separador = document.createElement('p');
-  separador.style.margin = '18px 0 4px';
-  separador.style.fontSize = '13px';
-  separador.textContent = 'o por internet, con un código';
-  ovExtra.appendChild(separador);
+  const rotulo = document.createElement('p');
+  rotulo.className = 'rotulo';
+  rotulo.textContent = 'Salas abiertas';
+  ovExtra.appendChild(rotulo);
+
+  const listaEl = document.createElement('div');
+  listaEl.className = 'salas';
+  ovExtra.appendChild(listaEl);
+
+  function pintarSalas(lista){
+    listaEl.innerHTML = '';
+    if (!lista || !lista.length){
+      const vacio = document.createElement('p');
+      vacio.style.cssText = 'margin:0; font-size:15px; color:var(--dim)';
+      vacio.textContent = 'Ninguna por ahora — crea la primera';
+      listaEl.appendChild(vacio);
+      return;
+    }
+    lista.forEach(s => {
+      const b = document.createElement('button');
+      b.className = 'ghost sala-btn';
+      b.innerHTML = '<b>' + s.codigo + '</b><span>' + s.jugadores + '/' + s.max + '</span>';
+      b.onclick = () => {
+        guardarNombre();
+        enCuantoAbra(() => mandar({ t: 'unir', modo: MODO, codigo: s.codigo, nombre: nombreActual() }));
+      };
+      listaEl.appendChild(b);
+    });
+  }
+  renderizarSalas = pintarSalas;
+  pintarSalas([]);
 
   const btnCrear = document.createElement('button');
   btnCrear.className = 'ghost';
-  btnCrear.textContent = 'Crear sala privada';
-  btnCrear.onclick = () => { guardarNombre(); conectar(inpNombre.value || 'Jugador', { t: 'crear', modo: MODO }); };
+  btnCrear.textContent = 'Crear sala nueva';
+  btnCrear.onclick = () => {
+    guardarNombre();
+    enCuantoAbra(() => mandar({ t: 'crear', modo: MODO, nombre: nombreActual() }));
+  };
+  ovExtra.appendChild(btnCrear);
 
   const inpCodigo = document.createElement('input');
-  inpCodigo.maxLength = 4; inpCodigo.placeholder = 'Código de sala';
+  inpCodigo.maxLength = 4; inpCodigo.placeholder = 'código';
   inpCodigo.style.width = '110px'; inpCodigo.style.textTransform = 'uppercase';
   inpCodigo.value = codigoUrl;
 
   const btnUnir = document.createElement('button');
   btnUnir.className = 'ghost';
-  btnUnir.textContent = 'Unirse';
+  btnUnir.textContent = 'Unirse con código';
   btnUnir.onclick = () => {
     const codigo = inpCodigo.value.trim().toUpperCase();
     if (!codigo){ inpCodigo.focus(); return; }
     guardarNombre();
-    conectar(inpNombre.value || 'Jugador', { t: 'unir', modo: MODO, codigo });
+    enCuantoAbra(() => mandar({ t: 'unir', modo: MODO, codigo, nombre: nombreActual() }));
   };
   inpCodigo.addEventListener('keydown', ev => { if (ev.key === 'Enter') btnUnir.click(); });
 
   const filaCodigo = document.createElement('div');
   filaCodigo.className = 'fila';
-  filaCodigo.append(btnCrear, inpCodigo, btnUnir);
+  filaCodigo.append(inpCodigo, btnUnir);
   ovExtra.appendChild(filaCodigo);
 
+  abrirSocket();
   overlay.classList.remove('hidden');
   if (codigoUrl) inpCodigo.focus(); else inpNombre.focus();
 }
@@ -869,15 +911,35 @@ function refrescarPantalla(){
 /* ---------- red ---------- */
 function mandar(obj){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
-let miCodigo = null;
+// ejecuta fn en cuanto el socket esté abierto (ya lo está casi siempre: se abre
+// apenas se muestra la pantalla de conexión, antes de que el jugador pulse nada)
+function enCuantoAbra(fn){
+  if (ws && ws.readyState === 1) fn();
+  else if (ws) ws.addEventListener('open', fn, { once: true });
+}
 
-function conectar(nombre, entrada){
-  ovTitle.textContent = 'Conectando…';
-  ovExtra.innerHTML = '';
+let miCodigo = null;
+let temporizadorSalas = null;
+
+function detenerListado(){
+  if (temporizadorSalas){ clearInterval(temporizadorSalas); temporizadorSalas = null; }
+}
+
+function pedirSalas(){ mandar({ t: 'listar', modo: MODO }); }
+
+// abre el socket apenas se entra a la pantalla de conexión: así la lista de
+// salas abiertas ya está pedida antes de que el jugador toque ningún botón
+function abrirSocket(){
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-  ws.onopen = () => { mandar({ ...entrada, nombre }); estadoEl.textContent = 'Conectado a ' + location.host; };
   let salidaVoluntaria = false;
+  ws.onopen = () => {
+    estadoEl.textContent = 'Conectado a ' + location.host;
+    pedirSalas();
+    detenerListado();
+    temporizadorSalas = setInterval(pedirSalas, 3000);
+  };
   ws.onclose = () => {
+    detenerListado();
     estadoEl.textContent = 'Desconectado';
     if (salidaVoluntaria) return;
     ovTitle.textContent = 'Se perdió la conexión';
@@ -887,17 +949,22 @@ function conectar(nombre, entrada){
   };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if (m.t === 'bienvenido'){ miId = m.id; miColor = m.color; miCodigo = m.codigo; return; }
+    if (m.t === 'salas'){ if (renderizarSalas) renderizarSalas(m.lista); return; }
+    if (m.t === 'bienvenido'){ detenerListado(); miId = m.id; miColor = m.color; miCodigo = m.codigo; return; }
     if (m.t === 'lleno'){
+      detenerListado();
       ovTitle.textContent = 'Sala llena'; ovText.textContent = 'Ya hay ' + MAX_JUG + ' jugadores.';
       ovExtra.innerHTML = ''; const v = document.createElement('button');
-      v.textContent = 'Volver'; v.onclick = () => { salidaVoluntaria = true; ws.close(); pantallaConexion(); }; ovExtra.appendChild(v);
+      v.className = 'ghost'; v.textContent = 'Volver';
+      v.onclick = () => { salidaVoluntaria = true; ws.close(); pantallaConexion(); }; ovExtra.appendChild(v);
       return;
     }
     if (m.t === 'error'){
+      detenerListado();
       ovTitle.textContent = 'No se pudo entrar'; ovText.textContent = m.motivo;
       ovExtra.innerHTML = ''; const v = document.createElement('button');
-      v.textContent = 'Volver'; v.onclick = () => { salidaVoluntaria = true; ws.close(); pantallaConexion(); }; ovExtra.appendChild(v);
+      v.className = 'ghost'; v.textContent = 'Volver';
+      v.onclick = () => { salidaVoluntaria = true; ws.close(); pantallaConexion(); }; ovExtra.appendChild(v);
       return;
     }
     if (m.t === 'lobby'){
@@ -963,7 +1030,12 @@ const MAPA = {
   ArrowUp:'u', w:'u', ArrowDown:'d', s:'d',
   ArrowLeft:'l', a:'l', ArrowRight:'r', d:'r'
 };
+const enCampoDeTexto = ev => {
+  const t = ev.target;
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+};
 addEventListener('keydown', ev => {
+  if (enCampoDeTexto(ev)) return;       // escribiendo el nombre o el código: no jugar con esas teclas
   if (ev.repeat) return;
   const k = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
   if (MAPA[k]){ teclas[MAPA[k]] = 1; mandarTeclas(); ev.preventDefault(); return; }
@@ -973,6 +1045,7 @@ addEventListener('keydown', ev => {
   if (k === 'Escape'){ mandar({ t: 'cancela' }); return; }
 });
 addEventListener('keyup', ev => {
+  if (enCampoDeTexto(ev)) return;
   const k = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
   if (MAPA[k]){ teclas[MAPA[k]] = 0; mandarTeclas(); }
 });

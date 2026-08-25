@@ -603,6 +603,17 @@ wss.on('connection', ws => {
     let m;
     try { m = JSON.parse(datos.toString()); } catch { return; }
 
+    if (m.t === 'listar'){                    // lista de salas abiertas, para elegir sin escribir código
+      if (jugador) return;
+      const modo = m.modo === 'historia' ? 'historia' : 'versus';
+      const lista = [];
+      for (const s of salas.values())
+        if (s.modo === modo && s.fase === 'lobby')
+          lista.push({ codigo: s.codigo, jugadores: s.jugadores.size, max: MAX_JUGADORES[modo] });
+      enviar(ws, { t: 'salas', lista });
+      return;
+    }
+
     if (m.t === 'rapida'){                    // modo LAN: te mete en cualquier sala abierta, o crea una
       if (jugador) return;
       const modo = m.modo === 'historia' ? 'historia' : 'versus';
