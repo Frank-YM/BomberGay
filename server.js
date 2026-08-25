@@ -71,7 +71,7 @@ function crearSala(modo, codigo){
     jugadores: new Map(),       // id -> jugador
     clientes: new Set(),        // sockets de la sala, para difundir sin barrer todas las conexiones
     grid: null, items: null,
-    bombas: [], llamas: [], enemigos: [],
+    bombas: [], llamas: [], enemigos: [], rayos: [],
     tema: 0, ronda: 1, aviso: '', temporizador: 0, gridSucio: true, campeon: null,
     salida: null, salidaAbierta: false, victoria: false
   };
@@ -124,7 +124,7 @@ function bloqueado(cx, cy, ent){
 function nuevoMapa(){
   sala.grid  = new Uint8Array(COLS * ROWS);
   sala.items = new Array(COLS * ROWS).fill(null);
-  sala.bombas = []; sala.llamas = []; sala.enemigos = [];
+  sala.bombas = []; sala.llamas = []; sala.enemigos = []; sala.rayos = [];
   sala.gridSucio = true;
   sala.salida = null; sala.salidaAbierta = false;
   const hist = sala.modo === 'historia';
@@ -384,6 +384,226 @@ function iaEnemigo(e, dt){
   e.dir = elegida;
 }
 
+/* ---------- banana: enemigo especial de versus — rápida, salta y dispara un
+   chorro de leche a distancia. Se agrega con la tecla R (hasta 5 a la vez),
+   nunca sale sola en el reparto normal de bichos. IA portada de index.html. */
+const DIRS4 = [[1,0],[-1,0],[0,1],[0,-1]];
+const BANANA_TP_RANGO = 4, BANANA_TP_AVISO = .55;
+const RAYO_ALCANCE = 4, RAYO_CARGA = .95, RAYO_DURACION = .45 * 1.3;
+const BANANA_MAX = 5;
+
+function peligrosa(cx, cy){
+  if (tile(cx, cy) !== EMPTY) return false;
+  if (llamaEn(cx, cy)) return true;
+  for (const b of sala.bombas){
+    if (b.cx === cx && b.cy === cy) return true;
+    if (b.cx !== cx && b.cy !== cy) continue;
+    const dist = Math.abs(b.cx - cx) + Math.abs(b.cy - cy);
+    if (dist > b.rango) continue;
+    const dx = Math.sign(cx - b.cx), dy = Math.sign(cy - b.cy);
+    let libre = true;
+    for (let r = 1; r < dist; r++)
+      if (tile(b.cx + dx * r, b.cy + dy * r) !== EMPTY){ libre = false; break; }
+    if (libre) return true;
+  }
+  return false;
+}
+
+// primer paso del camino más corto hasta una casilla que cumpla esMeta
+function caminoHacia(cx, cy, esMeta, evitarPeligro = true){
+  const clave = (x, y) => y * COLS + x;
+  if (esMeta(cx, cy)) return [0, 0];
+  const previo = new Map([[clave(cx, cy), null]]);
+  const cola = [[cx, cy]];
+  let hallado = null;
+  for (let i = 0; i < cola.length && !hallado; i++){
+    const [x, y] = cola[i];
+    for (const [dx, dy] of DIRS4){
+      const nx = x + dx, ny = y + dy, k = clave(nx, ny);
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+      if (previo.has(k)) continue;
+      if (tile(nx, ny) !== EMPTY || bombaEn(nx, ny)) continue;
+      if (evitarPeligro && peligrosa(nx, ny)) continue;
+      previo.set(k, [x, y]);
+      if (esMeta(nx, ny)){ hallado = [nx, ny]; break; }
+      cola.push([nx, ny]);
+    }
+  }
+  if (!hallado) return null;
+  let cur = hallado;
+  while (true){
+    const par = previo.get(clave(cur[0], cur[1]));
+    if (!par) return null;
+    if (par[0] === cx && par[1] === cy) return [cur[0] - cx, cur[1] - cy];
+    cur = par;
+  }
+}
+
+const celdaDeJugador = (cx, cy) =>
+  [...sala.jugadores.values()].some(p => p.vivo && cellOf(p.x) === cx && cellOf(p.y) === cy);
+
+// casillas desde las que se puede disparar a algún jugador (en línea y sin muros)
+function puntosDeTiro(){
+  const set = new Set();
+  for (const p of sala.jugadores.values()){
+    if (!p.vivo) continue;
+    const px = cellOf(p.x), py = cellOf(p.y);
+    for (const [dx, dy] of DIRS4)
+      for (let r = 1; r <= RAYO_ALCANCE + 1; r++){
+        const nx = px + dx * r, ny = py + dy * r;
+        if (tile(nx, ny) !== EMPTY) break;
+        set.add(ny * COLS + nx);
+      }
+  }
+  return set;
+}
+
+// ¿hay un jugador en línea recta, sin muros de por medio y dentro del alcance?
+function apuntarRayo(e){
+  const cx = cellOf(e.x), cy = cellOf(e.y);
+  for (const p of sala.jugadores.values()){
+    if (!p.vivo) continue;
+    const px = cellOf(p.x), py = cellOf(p.y);
+    let dx = 0, dy = 0, dist = 0;
+    if (py === cy && px !== cx){ dx = Math.sign(px - cx); dist = Math.abs(px - cx); }
+    else if (px === cx && py !== cy){ dy = Math.sign(py - cy); dist = Math.abs(py - cy); }
+    else continue;
+    if (dist > RAYO_ALCANCE) continue;
+    let libre = true;
+    for (let r = 1; r <= dist; r++)
+      if (tile(cx + dx * r, cy + dy * r) !== EMPTY){ libre = false; break; }
+    if (libre) return [dx, dy];
+  }
+  return null;
+}
+
+function dispararRayo(e){
+  const cx = cellOf(e.x), cy = cellOf(e.y);
+  const [dx, dy] = e.chargeDir;
+  const celdas = [];
+  for (let r = 1; r <= RAYO_ALCANCE; r++){
+    const nx = cx + dx * r, ny = cy + dy * r;
+    if (tile(nx, ny) !== EMPTY) break;
+    celdas.push({ cx: nx, cy: ny });
+  }
+  e.atkCd = 1.5 + Math.random() * 1.5;
+  if (!celdas.length) return;
+  sala.rayos.push({ x: e.x, y: e.y, dx, dy, celdas, t: RAYO_DURACION });
+}
+
+function golpesDeRayo(){
+  for (const r of sala.rayos)
+    for (const p of sala.jugadores.values()){
+      if (!p.vivo) continue;
+      const px = cellOf(p.x), py = cellOf(p.y);
+      if (r.celdas.some(c => c.cx === px && c.cy === py)) matar(p, null);
+    }
+}
+
+function elegirSaltoBanana(e){
+  const cx = cellOf(e.x), cy = cellOf(e.y);
+  const opciones = [];
+  for (let dy = -BANANA_TP_RANGO; dy <= BANANA_TP_RANGO; dy++)
+    for (let dx = -BANANA_TP_RANGO; dx <= BANANA_TP_RANGO; dx++){
+      if (!dx && !dy) continue;
+      if (Math.abs(dx) + Math.abs(dy) > BANANA_TP_RANGO) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (tile(nx, ny) !== EMPTY) continue;
+      if (bombaEn(nx, ny) || llamaEn(nx, ny)) continue;
+      if (celdaDeJugador(nx, ny)) continue;
+      if (sala.enemigos.some(o => o !== e && cellOf(o.x) === nx && cellOf(o.y) === ny)) continue;
+      opciones.push({ nx, ny });
+    }
+  if (!opciones.length) return null;
+
+  let destino = opciones[rnd(opciones.length)];
+  if (e.atkCd <= 1.2){                            // rayo casi listo: busca línea de tiro
+    const puntos = puntosDeTiro();
+    const buenas = opciones.filter(o => puntos.has(o.ny * COLS + o.nx) && !peligrosa(o.nx, o.ny));
+    if (buenas.length) return buenas[0];
+  }
+  const objetivo = [...sala.jugadores.values()].filter(p => p.vivo)
+    .sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y) - Math.hypot(b.x - e.x, b.y - e.y))[0];
+  if (objetivo)
+    destino = opciones.slice().sort((a, b) =>
+      Math.hypot(center(a.nx) - objetivo.x, center(a.ny) - objetivo.y) -
+      Math.hypot(center(b.nx) - objetivo.x, center(b.ny) - objetivo.y))[0];
+  return destino;
+}
+
+function saltarBanana(e){
+  const t = e.tpDestino;
+  e.tpDestino = null;
+  e.tpCd = 2 + Math.random() * 1.5;
+  if (!t || tile(t.nx, t.ny) !== EMPTY || llamaEn(t.nx, t.ny)) return;
+  e.x = center(t.nx); e.y = center(t.ny);
+}
+
+function iaBanana(e, dt){
+  if (e.charge > 0){                              // cargando el chorro: quieta
+    e.charge -= dt;
+    if (e.charge <= 0) dispararRayo(e);
+    return;
+  }
+  e.atkCd -= dt;
+  if (e.atkCd <= 0){
+    const d = apuntarRayo(e);
+    if (d){ e.charge = RAYO_CARGA; e.chargeMax = RAYO_CARGA; e.chargeDir = d; e.dir = [0, 0]; return; }
+  }
+
+  const cx = cellOf(e.x), cy = cellOf(e.y);
+  const enPeligro = peligrosa(cx, cy);
+
+  if (e.tpWarn > 0){                              // salto: aviso antes de saltar, quieta
+    e.tpWarn -= dt;
+    if (e.tpWarn <= 0) saltarBanana(e);
+    return;
+  }
+  e.tpCd -= dt;
+  if (e.tpCd <= 0 || (enPeligro && e.tpCd < 3)){
+    e.tpDestino = elegirSaltoBanana(e);
+    if (!e.tpDestino){ e.tpCd = .6; return; }
+    e.tpWarn = BANANA_TP_AVISO;
+    return;
+  }
+
+  e.pensar -= dt;
+  const centrado = Math.abs(e.x - center(cx)) < 2 && Math.abs(e.y - center(cy)) < 2;
+  const movido = paso(e, e.dir[0], e.dir[1], dt);
+  if (!movido || (centrado && e.pensar <= 0)){
+    e.pensar = .18 + Math.random() * .25;
+    let dir = null;
+    if (enPeligro) dir = caminoHacia(cx, cy, (x, y) => !peligrosa(x, y), false);
+    if (!dir && e.atkCd <= 1.2){
+      const puntos = puntosDeTiro();
+      if (puntos.size) dir = caminoHacia(cx, cy, (x, y) => puntos.has(y * COLS + x));
+    }
+    if (!dir) dir = caminoHacia(cx, cy, celdaDeJugador, true);
+    if (!dir){
+      const libres = DIRS4.filter(([dx, dy]) => !bloqueado(cx + dx, cy + dy, e) && !peligrosa(cx + dx, cy + dy));
+      dir = libres.length ? libres[rnd(libres.length)] : [0, 0];
+    }
+    e.dir = dir;
+  }
+}
+
+function agregarBanana(){
+  if (sala.enemigos.filter(e => e.kind === 'banana').length >= BANANA_MAX) return false;
+  let x, y, intentos = 0;
+  do {
+    x = 1 + rnd(COLS - 2); y = 1 + rnd(ROWS - 2);
+    intentos++;
+  } while (intentos < 200 &&
+           (tile(x, y) !== EMPTY || ESQUINAS.some(e => Math.abs(e.cx - x) + Math.abs(e.cy - y) < 4)));
+  if (tile(x, y) !== EMPTY) return false;
+  sala.enemigos.push({
+    kind: 'banana', x: center(x), y: center(y), dir: [1, 0], vel: 150, pensar: 0,
+    tpCd: 1 + Math.random(), tpWarn: 0, tpDestino: null,
+    atkCd: 1 + Math.random(), charge: 0, chargeMax: 0, chargeDir: null
+  });
+  return true;
+}
+
 /* ---------- bucle ---------- */
 function tick(dt){
   if (sala.fase === 'finRonda' || sala.fase === 'finPartida'){
@@ -460,7 +680,9 @@ function tick(dt){
   }
 
   sala.llamas = sala.llamas.filter(f => (f.t -= dt) > 0);
-  sala.enemigos.forEach(e => iaEnemigo(e, dt));
+  sala.rayos = sala.rayos.filter(r => (r.t -= dt) > 0);
+  sala.enemigos.forEach(e => e.kind === 'banana' ? iaBanana(e, dt) : iaEnemigo(e, dt));
+  golpesDeRayo();
   comprobarGolpes();
 
   const activos = [...sala.jugadores.values()].filter(p => p.vidas > 0);
@@ -555,8 +777,18 @@ function estado(){
     b: sala.bombas.map(b => [b.cx, b.cy, b.remoto ? 1 : 0, b.perfora ? 1 : 0]),
     f: sala.llamas.map(f => [f.cx, f.cy, f.core ? 1 : 0, f.dx || 0, f.dy || 0, f.spike || 0,
                              +(f.t / FLAME_TIME).toFixed(2), f.rango || 1]),
-    e: sala.enemigos.map(e => [Math.round(e.x), Math.round(e.y), e.kind === 'slime' ? 1 : 0,
-                               e.dir[0], e.dir[1]]),
+    e: sala.enemigos.map(e => [
+      Math.round(e.x), Math.round(e.y),
+      e.kind === 'slime' ? 1 : e.kind === 'banana' ? 2 : 0,
+      e.dir[0], e.dir[1],
+      e.charge > 0 ? +(1 - e.charge / (e.chargeMax || 1)).toFixed(2) : 0,
+      e.chargeDir ? e.chargeDir[0] : 0, e.chargeDir ? e.chargeDir[1] : 0,
+      e.tpWarn > 0 ? +(1 - e.tpWarn / BANANA_TP_AVISO).toFixed(2) : 0
+    ]),
+    r: sala.rayos.map(r => {
+      const ultima = r.celdas[r.celdas.length - 1];
+      return [Math.round(r.x), Math.round(r.y), r.dx, r.dy, ultima.cx, ultima.cy, +r.t.toFixed(2)];
+    }),
     p: [...sala.jugadores.values()].map(p => [
       p.id, Math.round(p.x), Math.round(p.y), p.dir[0], p.dir[1],
       p.vivo ? 1 : 0, p.vidas, p.maxVidas, +p.invuln.toFixed(1),
@@ -680,6 +912,10 @@ wss.on('connection', ws => {
     if (m.t === 'tp'){    jugador.pulsoTp = true; return; }
     if (m.t === 'det'){   jugador.pulsoDet = true; return; }
     if (m.t === 'cancela'){ jugador.cancelaAim = true; return; }
+    if (m.t === 'banana'){                    // tecla R: cualquiera agrega una, hasta 5 a la vez
+      if (sala.modo === 'versus' && sala.fase === 'jugando') agregarBanana();
+      return;
+    }
     if (m.t === 'apunta' && jugador.aim){   // ratón
       jugador.aim.cx = Math.max(0, Math.min(COLS-1, m.cx|0));
       jugador.aim.cy = Math.max(0, Math.min(ROWS-1, m.cy|0));
