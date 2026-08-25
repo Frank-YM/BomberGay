@@ -51,14 +51,20 @@
   #overlay h2{margin:0; font-size:32px; color:var(--acc)}
   #overlay p{margin:0; color:var(--dim); font-size:17px; line-height:1.6; max-width:420px}
   input{
-    font-size:18px; background:#232636; color:var(--txt); border:1px solid var(--line);
+    font-size:18px; font-weight:400; background:#161822; color:var(--txt); border:1px solid var(--line);
     border-radius:10px; padding:13px 16px; text-align:center;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,.4);
   }
+  input:focus{ outline:none; border-color:var(--acc) }
+  input::placeholder{ color:var(--dim) }
   button{
     font-size:18px; font-weight:700; cursor:pointer; color:#12131a; background:var(--acc);
     border:0; border-radius:10px; padding:14px 22px;
   }
-  button.ghost{background:transparent; color:var(--txt); border:1px solid var(--line)}
+  button.ghost{
+    background:rgba(255,255,255,.08); color:var(--txt); border:1px solid rgba(255,255,255,.2);
+  }
+  button.ghost:hover{ background:rgba(255,255,255,.16) }
   button:disabled{opacity:.45; cursor:default}
   .k{background:#232636; border:1px solid var(--line); border-radius:5px; padding:1px 6px; color:var(--txt)}
   .fila{display:flex; align-items:center; gap:10px; justify-content:center; flex-wrap:wrap}
