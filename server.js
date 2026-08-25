@@ -16,20 +16,24 @@ const PORT = process.env.PORT ? +process.env.PORT : 8090;
 const RAIZ = __dirname;
 
 /* ---------- servidor de archivos ---------- */
+// lista blanca: solo estas páginas y lo que haya en /sonidos/ se sirven por HTTP.
+// así server.js, package.json, .git, etc. nunca son alcanzables desde fuera.
 const TIPOS = {
   '.html': 'text/html; charset=utf-8',
-  '.js':   'text/javascript; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png':  'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg'
+  '.mp3':  'audio/mpeg'
 };
+const PAGINAS = new Set(['/menu.html', '/index.html', '/versus.html']);
 
 const servidor = http.createServer((req, res) => {
   let rel = decodeURIComponent(req.url.split('?')[0]);
   if (rel === '/') rel = '/menu.html';
   if (rel === '/historia.html') rel = '/versus.html';   // mismo cliente, otro modo
-  const file = path.join(RAIZ, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
-  if (!file.startsWith(RAIZ)){ res.writeHead(403); return res.end('no'); }
+
+  let file;
+  if (PAGINAS.has(rel)) file = path.join(RAIZ, rel);
+  else if (rel.startsWith('/sonidos/')) file = path.join(RAIZ, 'sonidos', path.basename(rel));
+  else { res.writeHead(404); return res.end('404'); }
+
   fs.readFile(file, (err, data) => {
     if (err){ res.writeHead(404); return res.end('404'); }
     res.writeHead(200, { 'Content-Type': TIPOS[path.extname(file)] || 'application/octet-stream' });
