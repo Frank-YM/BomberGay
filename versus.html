@@ -63,12 +63,27 @@
   .k{background:#232636; border:1px solid var(--line); border-radius:5px; padding:1px 6px; color:var(--txt)}
   .fila{display:flex; align-items:center; gap:10px; justify-content:center; flex-wrap:wrap}
   .rotulo{color:var(--dim); font-size:14px; letter-spacing:.06em; text-transform:uppercase; margin:4px 0 0}
-  .salas{display:flex; flex-direction:column; gap:8px; width:100%; max-width:340px}
+  .salas{display:flex; flex-direction:column; gap:10px; width:100%; max-width:360px}
   .sala-btn{
     display:flex; align-items:center; justify-content:space-between; width:100%;
-    font-size:19px; font-weight:800; padding:15px 20px;
+    font-size:21px; font-weight:800; padding:16px 20px; text-align:left;
+    background:linear-gradient(135deg, rgba(255,176,46,.14), rgba(255,107,157,.08));
+    border:1px solid rgba(255,176,46,.4); border-left:4px solid var(--acc);
+    color:var(--txt); border-radius:10px; cursor:pointer;
+    transition:transform .12s ease, background .12s ease, border-color .12s ease;
   }
-  .sala-btn span{font-size:15px; font-weight:600; color:var(--dim)}
+  .sala-btn:hover{
+    background:linear-gradient(135deg, rgba(255,176,46,.26), rgba(255,107,157,.16));
+    border-color:var(--acc); transform:translateY(-2px);
+  }
+  .sala-btn b{letter-spacing:.16em}
+  .sala-btn .cupo{
+    display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:700;
+    padding:5px 12px; border-radius:999px; background:rgba(126,231,135,.18); color:#9cf0a8;
+    white-space:nowrap;
+  }
+  .sala-btn .cupo.casiLlena{ background:rgba(255,176,46,.2); color:#ffcf8a }
+  .sala-btn .cupo .punto{ width:7px; height:7px; border-radius:50%; background:currentColor }
   #estado{font-size:12px; color:var(--dim)}
 </style>
 </head>
@@ -643,22 +658,32 @@ function actualizarPrediccion(dt){
   if (!prediccion) prediccion = { x: posServidor.x, y: posServidor.y };
 
   const yo = est.p.find(p => p[0] === miId);
-  const aimando = yo && yo[9] >= 0;
-  const puedeMoverse = yo && yo[5] && yo[17] <= 0 && !aimando;   // vivo, no muriendo, sin mira abierta
+  if (!yo){ prediccion.x = posServidor.x; prediccion.y = posServidor.y; return; }
+  const aimando = yo[9] >= 0;
+  const puedeMoverse = yo[5] && yo[17] <= 0 && !aimando;   // vivo, no muriendo, sin mira abierta
 
-  if (puedeMoverse){
-    let dx = (teclas.r ? 1 : 0) - (teclas.l ? 1 : 0);
-    let dy = (teclas.d ? 1 : 0) - (teclas.u ? 1 : 0);
-    if (dx && dy) dy = 0;
-    pasoLocal(prediccion, dx, dy, dt, yo[18] || 105);
-    // jalón suave hacia la verdad del servidor: corrige cualquier desvío
-    // (bombas, otros jugadores, algo que el cliente no predice) sin que se note
-    const correccion = Math.min(1, 6 * dt);
-    prediccion.x += (posServidor.x - prediccion.x) * correccion;
-    prediccion.y += (posServidor.y - prediccion.y) * correccion;
-  } else {
+  if (!puedeMoverse){
     prediccion.x = posServidor.x;
     prediccion.y = posServidor.y;
+    return;
+  }
+
+  let dx = (teclas.r ? 1 : 0) - (teclas.l ? 1 : 0);
+  let dy = (teclas.d ? 1 : 0) - (teclas.u ? 1 : 0);
+  if (dx && dy) dy = 0;
+  pasoLocal(prediccion, dx, dy, dt, yo[18] || 105);
+
+  // el choque contra una pared es determinista: cliente y servidor calculan
+  // exactamente lo mismo, así que no hay que corregir nada ahí — hacerlo
+  // (como antes) es forcejear contra tu propio choque cada cuadro, y eso
+  // se sentía como que "se traba" al tocar un bloque. Solo corregimos si
+  // el desvío es de verdad grande (una bomba, otro jugador empujando, o
+  // un salto de red), y de forma suave, no de golpe.
+  const errX = posServidor.x - prediccion.x, errY = posServidor.y - prediccion.y;
+  if (Math.hypot(errX, errY) > 14){
+    const correccion = Math.min(1, 8 * dt);
+    prediccion.x += errX * correccion;
+    prediccion.y += errY * correccion;
   }
 }
 
@@ -871,8 +896,11 @@ function pantallaConexion(){
     }
     lista.forEach(s => {
       const b = document.createElement('button');
-      b.className = 'ghost sala-btn';
-      b.innerHTML = '<b>' + s.codigo + '</b><span>' + s.jugadores + '/' + s.max + '</span>';
+      b.className = 'sala-btn';
+      const casiLlena = s.jugadores >= s.max - 1;
+      b.innerHTML = '<b>' + s.codigo + '</b>' +
+        '<span class="cupo' + (casiLlena ? ' casiLlena' : '') + '">' +
+          '<span class="punto"></span>' + s.jugadores + '/' + s.max + '</span>';
       b.onclick = () => {
         guardarNombre();
         enCuantoAbra(() => mandar({ t: 'unir', modo: MODO, codigo: s.codigo, nombre: nombreActual() }));
