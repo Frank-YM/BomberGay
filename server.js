@@ -44,7 +44,7 @@ const servidor = http.createServer((req, res) => {
 /* ---------- constantes del juego ---------- */
 const COLS = 20, ROWS = 13, TS = 40;
 const EMPTY = 0, SOLID = 1, BRICK = 2;
-const BOMB_TIME = 2.4, FLAME_TIME = .5, TICK = 1 / 60, ENVIO = 2;   // simula a 60, manda a 30
+const BOMB_TIME = 2.4, FLAME_TIME = .5, TICK = 1 / 60, ENVIO = 1;   // simula a 60, manda a 60 (mensajes de ~300B, de sobra)
 const TP_COOLDOWN = 4, RONDAS_PARA_GANAR = 3;
 
 const COLORES = ['#4ec3ff', '#7ee787', '#ffb02e', '#ff6b9d'];
@@ -194,9 +194,8 @@ function nuevoMapa(){
 
 /* ---------- jugadores ---------- */
 function colocarJugadores(reset = true){
-  let i = 0;
   for (const p of sala.jugadores.values()){
-    const e = ESQUINAS[i % 4];
+    const e = ESQUINAS[p.esquina % 4];
     p.x = center(e.cx); p.y = center(e.cy);
     p.vivo = p.vidas > 0; p.muriendo = 0; p.invuln = 2;
     if (reset){
@@ -207,7 +206,6 @@ function colocarJugadores(reset = true){
     }
     p.enSalida = false;
     p.aim = null; p.aimT = 0; p.tpCd = 0; p.dir = [0, 0];
-    i++;
   }
 }
 
@@ -564,7 +562,7 @@ function estado(){
       p.vivo ? 1 : 0, p.vidas, p.maxVidas, +p.invuln.toFixed(1),
       p.aim ? p.aim.cx : -1, p.aim ? p.aim.cy : -1,
       p.remoto ? 1 : 0, p.espinas ? 1 : 0, p.maxBombas, p.rango, p.puntos,
-      +p.tpCd.toFixed(1), +p.muriendo.toFixed(2)
+      +p.tpCd.toFixed(1), +p.muriendo.toFixed(2), Math.round(p.vel)
     ])
   };
   if (sala.gridSucio && sala.grid){
@@ -575,9 +573,18 @@ function estado(){
   return msg;
 }
 
+// primer puesto (color/esquina) libre, no el tamaño actual: si alguien se fue
+// y otro entra después, jugadores.size puede repetir un puesto ya ocupado
+function puestoLibre(s){
+  const ocupados = new Set([...s.jugadores.values()].map(p => p.esquina));
+  const tope = MAX_JUGADORES[s.modo];
+  for (let i = 0; i < tope; i++) if (!ocupados.has(i)) return i;
+  return s.jugadores.size;
+}
+
 function unirJugador(ws, s, nombre){
   const id = siguienteId++;
-  const esquina = s.jugadores.size;
+  const esquina = puestoLibre(s);
   const jugador = {
     id, ws, esquina,
     nombre: String(nombre || 'Jugador').slice(0, 12),
@@ -599,6 +606,7 @@ function unirJugador(ws, s, nombre){
 }
 
 wss.on('connection', ws => {
+  ws._socket?.setNoDelay(true);   // sin esto, TCP agrupa paquetes chicos y suma hasta ~40ms por mensaje
   let jugador = null;
   ws.vivo = true;
   ws.on('pong', () => { ws.vivo = true; });

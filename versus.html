@@ -603,6 +603,65 @@ function vignette(){
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 
+/* ---------- predicción local: tu propio jugador se mueve al instante al
+   pulsar una tecla, sin esperar la ida y vuelta al servidor. Se corrige
+   solo, suavemente, contra la posición real que manda el servidor. ---------- */
+let prediccion = null;              // { x, y } — solo para miId
+let posServidor = null;             // última posición cruda que mandó el servidor para miId
+
+function bloqueadoLocal(cx, cy){
+  if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return true;
+  return grid[cy * COLS + cx] !== EMPTY;
+}
+// misma lógica que paso() en server.js, pero solo contra paredes/bloques
+// (bombas y otros jugadores los ignora: cualquier desvío se corrige solo
+// en el siguiente snapshot, que ahora llega cada ~16ms)
+function pasoLocal(p, dx, dy, dt, vel){
+  if (!dx && !dy) return;
+  const s = vel * dt;
+  const cx = Math.floor(p.x / TS), cy = Math.floor(p.y / TS);
+  if (dx){
+    const carril = center(cy), d = carril - p.y;
+    if (Math.abs(d) > .5) p.y += Math.sign(d) * Math.min(s * .8, Math.abs(d));
+    else p.y = carril;
+    const nx = p.x + dx * s, borde = nx + dx * 13;
+    if (!bloqueadoLocal(Math.floor(borde / TS), Math.floor(p.y / TS))) p.x = nx;
+    else { const tope = center(cx); p.x = dx > 0 ? Math.min(nx, tope) : Math.max(nx, tope); }
+  }
+  if (dy){
+    const carril = center(cx), d = carril - p.x;
+    if (Math.abs(d) > .5) p.x += Math.sign(d) * Math.min(s * .8, Math.abs(d));
+    else p.x = carril;
+    const ny = p.y + dy * s, borde = ny + dy * 13;
+    if (!bloqueadoLocal(Math.floor(p.x / TS), Math.floor(borde / TS))) p.y = ny;
+    else { const tope = center(cy); p.y = dy > 0 ? Math.min(ny, tope) : Math.max(ny, tope); }
+  }
+}
+
+function actualizarPrediccion(dt){
+  if (!posServidor) return;
+  if (!prediccion) prediccion = { x: posServidor.x, y: posServidor.y };
+
+  const yo = est.p.find(p => p[0] === miId);
+  const aimando = yo && yo[9] >= 0;
+  const puedeMoverse = yo && yo[5] && yo[17] <= 0 && !aimando;   // vivo, no muriendo, sin mira abierta
+
+  if (puedeMoverse){
+    let dx = (teclas.r ? 1 : 0) - (teclas.l ? 1 : 0);
+    let dy = (teclas.d ? 1 : 0) - (teclas.u ? 1 : 0);
+    if (dx && dy) dy = 0;
+    pasoLocal(prediccion, dx, dy, dt, yo[18] || 105);
+    // jalón suave hacia la verdad del servidor: corrige cualquier desvío
+    // (bombas, otros jugadores, algo que el cliente no predice) sin que se note
+    const correccion = Math.min(1, 6 * dt);
+    prediccion.x += (posServidor.x - prediccion.x) * correccion;
+    prediccion.y += (posServidor.y - prediccion.y) * correccion;
+  } else {
+    prediccion.x = posServidor.x;
+    prediccion.y = posServidor.y;
+  }
+}
+
 function render(){
   const real = est;
   est = mezcla();
@@ -619,6 +678,7 @@ function render(){
   const ahora = performance.now();
   const dt = Math.min(.05, (ahora - (render.ultimo || ahora)) / 1000);
   render.ultimo = ahora;
+  actualizarPrediccion(dt);
   sacudida *= .86;
   fogonazo = Math.max(0, fogonazo - dt * 3.2);
   luces = luces.filter(l => (l.t -= dt) > 0);
@@ -645,7 +705,11 @@ function render(){
     else drawBicho('e' + i, x, y, [dx, dy]);
   });
   est.p.forEach(p => {
-    const [id, x, y, dx, dy, vivo, vidas, maxVidas, invuln, aimcx, aimcy, , , maxBombas, , , tpCd, muriendo] = p;
+    const [id, xServ, yServ, dx, dy, vivo, vidas, maxVidas, invuln, aimcx, aimcy, , , maxBombas, , , tpCd, muriendo] = p;
+    // el propio jugador se dibuja en su posición predicha localmente (instantánea);
+    // el resto sigue con la posición interpolada del servidor, como antes
+    const propio = id === miId && prediccion && vivo && muriendo <= 0;
+    const x = propio ? prediccion.x : xServ, y = propio ? prediccion.y : yServ;
     const info = lobby.jugadores.find(j => j.id === id);
     const color = info ? info.color : '#4ec3ff';
     if (muriendo > 0){
@@ -999,6 +1063,12 @@ function abrirSocket(){
         });
       }
       est = m;
+      const yoNuevo = m.p.find(q => q[0] === miId);
+      if (yoNuevo){
+        const saltoGrande = posServidor && Math.hypot(yoNuevo[1] - posServidor.x, yoNuevo[2] - posServidor.y) > TS * 1.6;
+        posServidor = { x: yoNuevo[1], y: yoNuevo[2] };
+        if (saltoGrande) prediccion = { x: posServidor.x, y: posServidor.y };   // teletransporte: no deslizar
+      }
       if (m.g){
         boardSucio = true;
         for (let i = 0; i < grid.length; i++){
