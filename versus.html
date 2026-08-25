@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bombergay — LAN</title>
+<title>Bombergay</title>
 <style>
   :root{ --bg:#12131a; --panel:#1c1e29; --line:#2b2e3d; --txt:#e8eaf2; --dim:#9aa0b5; --acc:#ffb02e; }
   *{box-sizing:border-box}
@@ -89,7 +89,7 @@
 </head>
 <body>
 
-<h1>Bombergay <small id="subtitulo">versus en red local</small></h1>
+<h1>Bombergay <small id="subtitulo">en red · hasta 4 jugadores</small></h1>
 
 <div id="marcador"></div>
 
@@ -148,9 +148,9 @@ const ovText   = document.getElementById('ov-text');
 const ovExtra  = document.getElementById('ov-extra');
 const marcador = document.getElementById('marcador');
 const estadoEl = document.getElementById('estado');
-document.title = HIST ? 'Bombergay Historia — LAN' : 'Bombergay Versus — LAN';
+document.title = HIST ? 'Bombergay Historia' : 'Bombergay Versus';
 document.getElementById('subtitulo').textContent =
-  HIST ? 'modo historia en red · 1 o 2 jugadores' : 'versus en red local';
+  HIST ? 'modo historia en red · 1 o 2 jugadores' : 'en red · hasta 4 jugadores';
 
 /* ---------- estado local ---------- */
 let ws = null, miId = null, miColor = '#4ec3ff';
@@ -1098,7 +1098,7 @@ function pantallaConexion(){
   const nombreActual = () => inpNombre.value || 'Jugador';
 
   const btnRapida = document.createElement('button');
-  btnRapida.textContent = 'Jugar en red local';
+  btnRapida.textContent = 'Jugar ahora';
   btnRapida.onclick = () => {
     guardarNombre();
     enCuantoAbra(() => mandar({ t: 'rapida', modo: MODO, nombre: nombreActual() }));
