@@ -623,6 +623,15 @@ function vignette(){
    solo, suavemente, contra la posición real que manda el servidor. ---------- */
 let prediccion = null;              // { x, y } — solo para miId
 let posServidor = null;             // última posición cruda que mandó el servidor para miId
+let bombasFantasma = [];            // { cx, cy, t } — bomba visual instantánea, no espera al servidor
+
+function intentarBombaFantasma(){
+  if (!prediccion) return;
+  const cx = Math.floor(prediccion.x / TS), cy = Math.floor(prediccion.y / TS);
+  if (bombasFantasma.some(b => b.cx === cx && b.cy === cy)) return;
+  if (est.b.some(b => b[0] === cx && b[1] === cy)) return;
+  bombasFantasma.push({ cx, cy, t: 0 });
+}
 
 function bloqueadoLocal(cx, cy){
   if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return true;
@@ -723,6 +732,17 @@ function render(){
     }
   if (est.sal && grid[est.sal[1] * COLS + est.sal[0]] === EMPTY)
     drawPuerta(est.sal[0], est.sal[1], !!est.sal[2]);
+  // bombas fantasma: se ven al instante al presionar espacio, antes de que
+  // el servidor confirme; se descartan solas al llegar la real (o a los .4s)
+  bombasFantasma = bombasFantasma.filter(b => {
+    b.t += dt;
+    return !est.b.some(rb => rb[0] === b.cx && rb[1] === b.cy) && b.t < .4;
+  });
+  if (bombasFantasma.length){
+    ctx.save(); ctx.globalAlpha = .55;
+    bombasFantasma.forEach(b => drawBomb([b.cx, b.cy, 0, 0]));
+    ctx.restore();
+  }
   est.b.forEach(drawBomb);
   est.e.forEach((e, i) => {
     const [x, y, esSlime, dx, dy] = e;
@@ -821,6 +841,14 @@ function pintarMarcador(){
   cod.innerHTML = '<span style="color:var(--dim)">Sala</span> <b style="letter-spacing:.1em">' +
     (lobby.codigo || miCodigo || '····') + '</b>';
   marcador.appendChild(cod);
+  if (miPing != null){
+    const pin = document.createElement('div');
+    pin.className = 'chip';
+    const col = miPing < 60 ? '#7ee787' : miPing < 150 ? '#ffc247' : '#ff6b6b';
+    pin.innerHTML = '<span class="punto" style="background:' + col + '"></span>' +
+      '<b style="color:' + col + '">' + miPing + 'ms</b>';
+    marcador.appendChild(pin);
+  }
   const cab = document.createElement('div');
   cab.className = 'chip';
   cab.innerHTML = HIST
@@ -1012,6 +1040,8 @@ function enCuantoAbra(fn){
 
 let miCodigo = null;
 let temporizadorSalas = null;
+let temporizadorPing = null;
+let miPing = null;    // ida y vuelta al servidor, en ms — null hasta la primera respuesta
 
 function detenerListado(){
   if (temporizadorSalas){ clearInterval(temporizadorSalas); temporizadorSalas = null; }
@@ -1019,19 +1049,28 @@ function detenerListado(){
 
 function pedirSalas(){ mandar({ t: 'listar', modo: MODO }); }
 
+function actualizarEstadoConexion(){
+  estadoEl.textContent = 'Conectado a ' + location.host + (miPing != null ? ' · ping ' + miPing + 'ms' : '');
+  if (lobby.codigo) pintarMarcador();   // refresca el chip de ping durante la partida
+}
+
 // abre el socket apenas se entra a la pantalla de conexión: así la lista de
 // salas abiertas ya está pedida antes de que el jugador toque ningún botón
 function abrirSocket(){
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
   let salidaVoluntaria = false;
   ws.onopen = () => {
-    estadoEl.textContent = 'Conectado a ' + location.host;
+    actualizarEstadoConexion();
     pedirSalas();
     detenerListado();
     temporizadorSalas = setInterval(pedirSalas, 3000);
+    mandar({ t: 'ping', t0: performance.now() });
+    temporizadorPing = setInterval(() => mandar({ t: 'ping', t0: performance.now() }), 2000);
   };
   ws.onclose = () => {
     detenerListado();
+    if (temporizadorPing){ clearInterval(temporizadorPing); temporizadorPing = null; }
+    miPing = null;
     estadoEl.textContent = 'Desconectado';
     if (salidaVoluntaria) return;
     ovTitle.textContent = 'Se perdió la conexión';
@@ -1041,6 +1080,7 @@ function abrirSocket(){
   };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
+    if (m.t === 'pong'){ miPing = Math.round(performance.now() - m.t0); actualizarEstadoConexion(); return; }
     if (m.t === 'salas'){ if (renderizarSalas) renderizarSalas(m.lista); return; }
     if (m.t === 'bienvenido'){ detenerListado(); miId = m.id; miColor = m.color; miCodigo = m.codigo; return; }
     if (m.t === 'lleno'){
@@ -1137,7 +1177,7 @@ addEventListener('keydown', ev => {
   if (ev.repeat) return;
   const k = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
   if (MAPA[k]){ teclas[MAPA[k]] = 1; mandarTeclas(); ev.preventDefault(); return; }
-  if (k === ' '){ mandar({ t: 'bomba' }); ev.preventDefault(); return; }
+  if (k === ' '){ mandar({ t: 'bomba' }); intentarBombaFantasma(); ev.preventDefault(); return; }
   if (k === 'q'){ mandar({ t: 'tp' }); return; }
   if (k === 'e'){ mandar({ t: 'det' }); return; }
   if (k === 'Escape'){ mandar({ t: 'cancela' }); return; }

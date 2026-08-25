@@ -615,6 +615,8 @@ wss.on('connection', ws => {
     let m;
     try { m = JSON.parse(datos.toString()); } catch { return; }
 
+    if (m.t === 'ping'){ enviar(ws, { t: 'pong', t0: m.t0 }); return; }
+
     if (m.t === 'listar'){                    // lista de salas abiertas, para elegir sin escribir código
       if (jugador) return;
       const modo = m.modo === 'historia' ? 'historia' : 'versus';
